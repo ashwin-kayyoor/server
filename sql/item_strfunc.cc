@@ -5293,6 +5293,162 @@ String *Item_temptable_rowid::val_str(String *str)
   return &str_value;
 }
 
+/**
+  Here is how we generate a key suitable for lexicographic comparison
+  from a numeric string (representing positive integer number).
+
+  We prepend variable length prefix, that only encodes string length
+  The longer the string, the lexicographically larger is the prefix.
+
+  Rules for generating prefix is following.
+
+  0. Number zero has no prefix
+  1. Small length (1 to 9)
+   Prefix is single char  '0' + length -1
+   This gives the range '0' - '8'
+  2. Medium length(10 to 18)
+   Prefix is 2 chars - concat('9', '0'+length-10)'
+   This gives range '90'-'98'
+  3. Large length(19)
+   Prefix is "990"
+  4. Huge length (20 to 2^32-1)
+   Prefix stars with '99', then log10 of the length is added as char
+   then the number itself is added
+   The range is '99120' - '9994294967295'
+
+  Fractions.
+  Numbers with leading zeroes are considered "fractional part", as in
+  Martin Pools implementation https://github.com/sourcefrog/natsort
+  fractional parts are prefixed with "0", which makes them sort between
+  0 and 1 and otherwise be compared as string. This can have several
+  gothas, such as 09 sorts  before 1, but at least this is compatible
+  to the PHPs implementation.
+
+*/
+String *Item_func_natural_sort_key::val_str(String *s)
+{
+  if (args[0]->is_null())
+  {
+    null_value= true;
+    return nullptr;
+  }
+
+  String *in= args[0]->val_str();
+  const CHARSET_INFO *cs= in->charset();
+  uchar *pos= (uchar *) in->ptr();
+  uchar *end= pos + in->length();
+  size_t num_len= 0;
+  uchar *num_start= nullptr;
+  bool fractional=false;
+  THD *thd= current_thd;
+  const ulong max_allowed_packet= thd->variables.max_allowed_packet;
+
+  s->reset(0, 0, 0, cs);
+  if (s->reserve((size_t)in->length() + in->length()/2 + 1))
+    goto error_exit;
+
+  for (;;)
+  {
+    my_wc_t c= 0;
+    int charlen;
+    if (s->length() > max_allowed_packet)
+    {
+      push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
+                          ER_WARN_ALLOWED_PACKET_OVERFLOWED,
+                          ER(ER_WARN_ALLOWED_PACKET_OVERFLOWED),
+                          func_name(), max_allowed_packet);
+      goto error_exit;
+    }
+    charlen= cs->mb_wc(&c, pos, end);
+    bool is_digit= charlen >= 1 && (c >= '0' && c <= '9');
+    if (!is_digit && num_start)
+    {
+      /* Handle end of digits run.*/
+      if (num_len == 0)
+      {
+        /* No prefix. */
+      }
+      else if (fractional)
+      {
+        if (s->append('0'))
+          goto error_exit;
+      }
+      else if (num_len < 10)
+      {
+        if (s->append('0' + (char) num_len - 1))
+          goto error_exit;
+      }
+      else if (num_len < 19)
+      {
+        if (s->append('9'))
+          goto error_exit;
+
+        if (s->append('0' + (char) (num_len - 10)))
+          goto error_exit;
+      }
+      else if (num_len == 19)
+      {
+        if (s->append("990", 3))
+          goto error_exit;
+      }
+      else // (n_digits > 19)
+      {
+        if (s->append("99", 2))
+          goto error_exit;
+        size_t n_digits_log10= 0;
+        for (size_t tmp= num_len / 10; tmp; tmp/= 10)
+          n_digits_log10++;
+        DBUG_ASSERT(n_digits_log10 && n_digits_log10 < 10);
+        if (s->append('0' + (char) n_digits_log10))
+          goto error_exit;
+        s->append_num(num_len);
+      }
+      if (s->append((const char *) num_start, pos - num_start, cs))
+        goto error_exit;
+
+      num_len= 0;
+      num_start= nullptr;
+      fractional= false;
+    }
+    if (charlen < 1)
+      break;
+    if (is_digit)
+    {
+      if (!num_start)
+        num_start= pos;
+      /* Do not count leading zeros.*/
+      if (c != '0' || num_len)
+        num_len++;
+      else
+        fractional= true;
+    }
+    else
+    {
+      /* Append non-digit.*/
+      if (s->append((const char *) pos, charlen))
+        goto error_exit;
+    }
+    pos+= charlen;
+  }
+  return s;
+
+error_exit:
+  s->reset(0,0,0,cs);
+  null_value=true;
+  return nullptr;
+}
+
+bool Item_func_natural_sort_key::fix_length_and_dec(void)
+{
+  if (agg_arg_charsets_for_string_result(collation, args, 1))
+    return true;
+  DBUG_ASSERT(collation.collation != NULL);
+  uint32 max_clen= args[0]->max_char_length();
+  fix_char_length(max_clen + max_clen/2 + ((max_clen <= 3)?1:0));
+  set_maybe_null();
+  return false;
+}
+
 #ifdef WITH_WSREP
 
 #include "wsrep_mysqld.h"

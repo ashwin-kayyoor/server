@@ -990,6 +990,14 @@ public:
     return append(s.str, s.length, cs);
   }
 
+  // Append a decimal number
+  bool append_num(ulonglong n)
+  {
+    char buf[20];
+    char *end = ll2str(n, buf, 10, 0);
+    return append(buf, end-buf);
+  }
+
   void strip_sp();
   friend String *copy_if_not_alloced(String *a,String *b,uint32 arg_length);
   friend class Field;

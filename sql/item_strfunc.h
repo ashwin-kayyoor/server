@@ -271,6 +271,25 @@ public:
   { return get_item_copy<Item_func_aes_decrypt>(thd, this); }
 };
 
+class Item_func_natural_sort_key : public Item_str_func
+{
+public:
+  Item_func_natural_sort_key(THD *thd, Item *a)
+      : Item_str_func(thd, a)
+  {
+  }
+  String *val_str(String *);
+  LEX_CSTRING func_name_cstring() const override
+  {
+    static LEX_CSTRING name= {STRING_WITH_LEN("natural_sort_key")};
+    return name;
+  }
+  bool fix_length_and_dec(void) override;
+  Item *get_copy(THD *thd) override
+  {
+    return get_item_copy<Item_func_natural_sort_key>(thd, this);
+  }
+};
 
 class Item_func_concat :public Item_str_func
 {

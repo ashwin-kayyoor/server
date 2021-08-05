@@ -13,4 +13,4 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335 USA
 
-MY_ADD_TESTS(spier_db_mbase_util-open_item_func)
+MY_ADD_TESTS(spier_db_mbase_util-open_item_func EXT "cc")

@@ -81,3 +81,7 @@ IF(MSVC)
                        COMMAND copy Debug\\ha_spider.dll ..\\..\\sql\\lib\\plugin\\ha_spider.dll)
   ENDIF()
 ENDIF()
+
+IF(WITH_UNIT_TESTS)
+  ADD_SUBDIRECTORY(unittest)
+ENDIF()
